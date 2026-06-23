@@ -110,10 +110,16 @@ function textFromContent(content: unknown): string | undefined {
 	return text || undefined;
 }
 
+interface RestoredTitle {
+	title: string;
+	resolved: boolean;
+	promptForAi?: string;
+}
+
 function restoredTitleFromSession(
 	ctx: { sessionManager: { getEntries(): unknown[]; getBranch(): unknown[] } },
 	sessionName: string | undefined,
-) {
+): RestoredTitle | undefined {
 	const entries = ctx.sessionManager.getEntries();
 	const branch = ctx.sessionManager.getBranch();
 	const candidates = entries.length > 0 ? entries : branch;
@@ -121,17 +127,21 @@ function restoredTitleFromSession(
 	for (let i = candidates.length - 1; i >= 0; i--) {
 		const entry = candidates[i] as { type?: string; customType?: string; data?: { title?: unknown } };
 		if (entry.type === "custom" && entry.customType === TITLE_ENTRY_TYPE && typeof entry.data?.title === "string") {
-			return normalizeAiTitle(entry.data.title);
+			return { title: normalizeAiTitle(entry.data.title), resolved: true };
 		}
 	}
 
-	if (sessionName?.trim()) return normalizeAiTitle(sessionName);
+	if (sessionName?.trim()) {
+		return { title: normalizeAiTitle(sessionName), resolved: true };
+	}
 
 	for (const entry of candidates) {
 		const message = (entry as { type?: string; message?: { role?: string; content?: unknown } }).message;
 		if ((entry as { type?: string }).type === "message" && message?.role === "user") {
-			const text = textFromContent(message.content);
-			if (text) return localFallbackTitle(text);
+			const prompt = textFromContent(message.content);
+			if (prompt) {
+				return { title: localFallbackTitle(prompt), resolved: false, promptForAi: prompt };
+			}
 		}
 	}
 
@@ -192,36 +202,19 @@ export default function (pi: ExtensionAPI) {
 	function restoreTitle(ctx: { sessionManager: { getEntries(): unknown[]; getBranch(): unknown[] } }) {
 		const sessionName = pi.getSessionName();
 		hadSessionNameAtStart = Boolean(sessionName?.trim());
-		taskTitle = restoredTitleFromSession(ctx, sessionName) ?? DEFAULT_TITLE;
-		titleResolved = taskTitle !== DEFAULT_TITLE;
+		const restored = restoredTitleFromSession(ctx, sessionName);
+
+		taskTitle = restored?.title ?? DEFAULT_TITLE;
+		titleResolved = restored?.resolved ?? false;
 		writeTerminalTitle(statusTitle(currentStatus));
+
+		return restored?.promptForAi;
 	}
 
-	pi.on("session_start", (_event, ctx) => {
-		configuredTitleModel = undefined;
-		currentStatus = "idle";
-		titleGenerationId++;
-		restoreTitle(ctx);
-
-		// On some resume paths, extension startup can observe session state before
-		// every restored entry is visible. Re-check shortly after startup so the
-		// title catches up without waiting for the next user prompt.
-		setTimeout(() => restoreTitle(ctx), 100);
-	});
-
-	pi.on("before_agent_start", async (event, ctx) => {
-		currentStatus = "working";
-
-		if (titleResolved) {
-			writeTerminalTitle(statusTitle(currentStatus));
-			return;
-		}
-
-		configuredTitleModel = readTitleModelSetting();
-		taskTitle = localFallbackTitle(event.prompt);
-		writeTerminalTitle(statusTitle(currentStatus));
-
-		const prompt = event.prompt;
+	function generateAndPersistTitle(
+		prompt: string,
+		ctx: Parameters<typeof generateTaskTitle>[1],
+	) {
 		const generationId = ++titleGenerationId;
 		void (async () => {
 			try {
@@ -239,6 +232,41 @@ export default function (pi: ExtensionAPI) {
 				// Keep the local fallback title if AI title generation fails.
 			}
 		})();
+	}
+
+	pi.on("session_start", (_event, ctx) => {
+		configuredTitleModel = readTitleModelSetting();
+		currentStatus = "idle";
+		titleGenerationId++;
+		const promptForAi = restoreTitle(ctx);
+		if (promptForAi && !titleResolved) {
+			generateAndPersistTitle(promptForAi, ctx);
+		}
+
+		// On some resume paths, extension startup can observe session state before
+		// every restored entry is visible. Re-check shortly after startup so the
+		// title catches up without waiting for the next user prompt.
+		setTimeout(() => {
+			if (titleResolved) return;
+			const delayedPromptForAi = restoreTitle(ctx);
+			if (delayedPromptForAi && !titleResolved) {
+				generateAndPersistTitle(delayedPromptForAi, ctx);
+			}
+		}, 100);
+	});
+
+	pi.on("before_agent_start", async (event, ctx) => {
+		currentStatus = "working";
+
+		if (titleResolved) {
+			writeTerminalTitle(statusTitle(currentStatus));
+			return;
+		}
+
+		configuredTitleModel = readTitleModelSetting();
+		taskTitle = localFallbackTitle(event.prompt);
+		writeTerminalTitle(statusTitle(currentStatus));
+		generateAndPersistTitle(event.prompt, ctx);
 	});
 
 	pi.on("agent_end", () => {
