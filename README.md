@@ -15,16 +15,28 @@ Features:
 
 ## Install
 
-From local checkout:
+Install from GitHub:
+
+```bash
+pi install git:git@github.com:chiroro-jr/pi-zed-terminal-title.git
+```
+
+Or with HTTPS:
+
+```bash
+pi install https://github.com/chiroro-jr/pi-zed-terminal-title
+```
+
+Try for one run without installing:
+
+```bash
+pi -e git:git@github.com:chiroro-jr/pi-zed-terminal-title.git
+```
+
+For local development:
 
 ```bash
 pi install /home/dennis/Documents/codespaces/personal/pi-zed-terminal-title
-```
-
-Or try for one run:
-
-```bash
-pi -e /home/dennis/Documents/codespaces/personal/pi-zed-terminal-title
 ```
 
 ## Configure title model
