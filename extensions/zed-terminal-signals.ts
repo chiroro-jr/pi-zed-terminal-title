@@ -13,6 +13,7 @@ let titleResolved = false;
 let configuredTitleModel: string | undefined;
 let currentStatus: "idle" | "working" = "idle";
 let titleGenerationId = 0;
+let hadSessionNameAtStart = false;
 
 function writeTerminalTitle(title: string) {
 	// OSC 0/2: set terminal/window title. Zed Terminal Threads read this.
@@ -183,13 +184,24 @@ async function generateTaskTitle(
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_start", (_event, ctx) => {
-		taskTitle = restoredTitleFromSession(ctx, pi.getSessionName()) ?? DEFAULT_TITLE;
+	function restoreTitle(ctx: { sessionManager: { getBranch(): unknown[] } }) {
+		const sessionName = pi.getSessionName();
+		hadSessionNameAtStart = Boolean(sessionName?.trim());
+		taskTitle = restoredTitleFromSession(ctx, sessionName) ?? DEFAULT_TITLE;
 		titleResolved = taskTitle !== DEFAULT_TITLE;
+		writeTerminalTitle(statusTitle(currentStatus));
+	}
+
+	pi.on("session_start", (_event, ctx) => {
 		configuredTitleModel = undefined;
 		currentStatus = "idle";
 		titleGenerationId++;
-		writeTerminalTitle(statusTitle(currentStatus));
+		restoreTitle(ctx);
+
+		// On some resume paths, extension startup can observe session state before
+		// every restored entry is visible. Re-check shortly after startup so the
+		// title catches up without waiting for the next user prompt.
+		setTimeout(() => restoreTitle(ctx), 100);
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -214,6 +226,9 @@ export default function (pi: ExtensionAPI) {
 				taskTitle = aiTitle;
 				titleResolved = true;
 				pi.appendEntry(TITLE_ENTRY_TYPE, { title: aiTitle });
+				if (!hadSessionNameAtStart) {
+					pi.setSessionName(aiTitle);
+				}
 				writeTerminalTitle(statusTitle(currentStatus));
 			} catch {
 				// Keep the local fallback title if AI title generation fails.
@@ -232,6 +247,7 @@ export default function (pi: ExtensionAPI) {
 		titleResolved = false;
 		configuredTitleModel = undefined;
 		currentStatus = "idle";
+		hadSessionNameAtStart = false;
 		titleGenerationId++;
 		writeTerminalTitle(statusTitle(currentStatus));
 	});
