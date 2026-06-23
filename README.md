@@ -33,7 +33,7 @@ In `~/.pi/agent/settings.json` or project `.pi/settings.json`:
 
 ```json
 {
-  "terminalThreadTitleModel": "openai/gpt-4o-mini"
+  "terminalThreadTitleModel": "openai-codex/gpt-5.4-mini"
 }
 ```
 
@@ -47,7 +47,7 @@ For sound notifications, enable Zed agent sound settings, for example:
 {
   "agent": {
     "notify_when_agent_waiting": "primary_screen",
-    "play_sound_when_agent_done": "when_hidden"
+    "play_sound_when_agent_done": "always"
   }
 }
 ```
