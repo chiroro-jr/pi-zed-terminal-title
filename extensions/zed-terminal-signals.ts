@@ -110,11 +110,16 @@ function textFromContent(content: unknown): string | undefined {
 	return text || undefined;
 }
 
-function restoredTitleFromSession(ctx: { sessionManager: { getBranch(): unknown[] } }, sessionName: string | undefined) {
+function restoredTitleFromSession(
+	ctx: { sessionManager: { getEntries(): unknown[]; getBranch(): unknown[] } },
+	sessionName: string | undefined,
+) {
+	const entries = ctx.sessionManager.getEntries();
 	const branch = ctx.sessionManager.getBranch();
+	const candidates = entries.length > 0 ? entries : branch;
 
-	for (let i = branch.length - 1; i >= 0; i--) {
-		const entry = branch[i] as { type?: string; customType?: string; data?: { title?: unknown } };
+	for (let i = candidates.length - 1; i >= 0; i--) {
+		const entry = candidates[i] as { type?: string; customType?: string; data?: { title?: unknown } };
 		if (entry.type === "custom" && entry.customType === TITLE_ENTRY_TYPE && typeof entry.data?.title === "string") {
 			return normalizeAiTitle(entry.data.title);
 		}
@@ -122,7 +127,7 @@ function restoredTitleFromSession(ctx: { sessionManager: { getBranch(): unknown[
 
 	if (sessionName?.trim()) return normalizeAiTitle(sessionName);
 
-	for (const entry of branch) {
+	for (const entry of candidates) {
 		const message = (entry as { type?: string; message?: { role?: string; content?: unknown } }).message;
 		if ((entry as { type?: string }).type === "message" && message?.role === "user") {
 			const text = textFromContent(message.content);
@@ -184,7 +189,7 @@ async function generateTaskTitle(
 }
 
 export default function (pi: ExtensionAPI) {
-	function restoreTitle(ctx: { sessionManager: { getBranch(): unknown[] } }) {
+	function restoreTitle(ctx: { sessionManager: { getEntries(): unknown[]; getBranch(): unknown[] } }) {
 		const sessionName = pi.getSessionName();
 		hadSessionNameAtStart = Boolean(sessionName?.trim());
 		taskTitle = restoredTitleFromSession(ctx, sessionName) ?? DEFAULT_TITLE;
